@@ -56,7 +56,7 @@ public class AnomalyDetector {
             long delta = s.timestampMs() - clientProfile.lastSeenMs();
             if (delta >= 0 && delta < burstThresholdMs) {
                 reasons.add("burst rhythm (" + delta + "ms < " + burstThresholdMs + "ms)");
-                score += 4.0;
+                score += 6.0;
             }
             double mean = clientProfile.intervalMean();
             double sd = clientProfile.intervalStddev();
@@ -73,7 +73,7 @@ public class AnomalyDetector {
         profiles.fingerprintProfile(fp).observe(s.timestampMs());
 
         if (score >= threshold) return Verdict.deny(score, reasons, fp);
-        return Verdict.allow(score, fp);
+        return Verdict.allow(score, reasons, fp);
     }
 
     private boolean uaIsBrowser(String ua) {
