@@ -1,0 +1,7 @@
+server:
+  port: 8110
+
+ghost:
+  threshold: 5.0
+  warmup-requests: 5
+  burst-threshold-ms: 50
