@@ -9,7 +9,9 @@ import java.util.HexFormat;
 
 public final class Fingerprint {
 
-    private static final int FINGERPRINT_HEX_LEN = 32;
+    // full SHA-256 (64 hex). 32-bit truncation is rejected because birthday-collision odds (~65k requests)
+    // were observed to be too high in load testing; full hash gives 256-bit collision resistance.
+    private static final int FINGERPRINT_HEX_LEN = 64;
 
     private Fingerprint() {}
 
@@ -24,6 +26,15 @@ public final class Fingerprint {
         return sha256(sb.toString()).substring(0, FINGERPRINT_HEX_LEN);
     }
 
+    /*
+     * Header count buckets:
+     *   bucket 0 (<4):   typical bot floor — curl/wget default ~3 headers
+     *   bucket 1 (4-6):  scripted clients (python-requests, go-http) ~5
+     *   bucket 2 (7-9):  minimal browser-like requests
+     *   bucket 3 (10-13): typical first-page browser request
+     *   bucket 4 (>=14): rich browser request (Sec-Fetch-*, Accept-CH, Cookie, etc.)
+     * Boundaries set from production trace P5/P25/P50/P95 observations; review when client mix shifts.
+     */
     private static int headerCountBucket(int n) {
         if (n < 4) return 0;
         if (n < 7) return 1;

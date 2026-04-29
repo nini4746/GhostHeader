@@ -127,4 +127,42 @@ class AnomalyDetectorTests {
         Verdict b = detector.evaluate(curlLike("h2", 200L));
         assertNotEquals(a.fingerprint(), b.fingerprint());
     }
+
+    @Test
+    void fingerprint_is_full_sha256_length() {
+        Verdict a = detector.evaluate(browserLike("fpLen", 100L));
+        assertEquals(64, a.fingerprint().length(), "expected full 64-hex SHA-256");
+    }
+
+    @Test
+    void profile_snapshot_is_atomic_under_concurrent_observers() throws Exception {
+        com.ghost.detect.Profile profile = store.clientProfile("snap-test");
+        int writers = 8;
+        int iters = 5_000;
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(writers + 1);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicBoolean inconsistent = new java.util.concurrent.atomic.AtomicBoolean(false);
+        java.util.concurrent.atomic.AtomicBoolean done = new java.util.concurrent.atomic.AtomicBoolean(false);
+        java.util.List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
+        for (int w = 0; w < writers; w++) {
+            futures.add(pool.submit(() -> {
+                try { start.await(); } catch (InterruptedException ie) { return; }
+                for (int i = 0; i < iters; i++) profile.observe(System.currentTimeMillis() + i);
+            }));
+        }
+        futures.add(pool.submit(() -> {
+            try { start.await(); } catch (InterruptedException ie) { return; }
+            while (!done.get()) {
+                com.ghost.detect.Profile.Snapshot snap = profile.snapshot();
+                if (snap.totalRequests() < snap.count()) inconsistent.set(true);
+                if (snap.intervalStddev() < 0) inconsistent.set(true);
+            }
+        }));
+        start.countDown();
+        for (int i = 0; i < writers; i++) futures.get(i).get();
+        done.set(true);
+        futures.get(writers).get();
+        pool.shutdown();
+        assertFalse(inconsistent.get(), "snapshot fields must be mutually consistent");
+    }
 }
