@@ -135,6 +135,35 @@ class AnomalyDetectorTests {
     }
 
     @Test
+    void anomaly_detector_handles_concurrent_evaluations_without_corruption() throws Exception {
+        int threads = 16;
+        int perThread = 200;
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger ok = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger blocked = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
+        for (int idx = 0; idx < threads; idx++) {
+            final int t = idx;
+            final String client = "stress-" + t;
+            futures.add(pool.submit(() -> {
+                try { start.await(); } catch (InterruptedException ie) { return; }
+                long base = 10_000_000L + t * 1000L;
+                for (int i = 0; i < perThread; i++) {
+                    com.ghost.model.RequestSnapshot s = browserLike(client, base + i * 7L);
+                    com.ghost.model.Verdict v = detector.evaluate(s);
+                    if (v.allow()) ok.incrementAndGet(); else blocked.incrementAndGet();
+                }
+            }));
+        }
+        start.countDown();
+        for (var f : futures) f.get();
+        pool.shutdown();
+        assertEquals(threads * perThread, ok.get() + blocked.get());
+        assertTrue(ok.get() > 0, "some requests must pass");
+    }
+
+    @Test
     void profile_snapshot_is_atomic_under_concurrent_observers() throws Exception {
         com.ghost.detect.Profile profile = store.clientProfile("snap-test");
         int writers = 8;
