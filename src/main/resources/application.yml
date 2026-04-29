@@ -1,6 +1,12 @@
 server:
   port: ${SERVER_PORT:8110}
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
 ghost:
   threshold: ${GHOST_THRESHOLD:5.0}
   warmup-requests: ${GHOST_WARMUP_REQUESTS:5}

@@ -1,6 +1,7 @@
 package com.ghost.web;
 
 import com.ghost.detect.AnomalyDetector;
+import com.ghost.detect.DetectionMetrics;
 import com.ghost.model.RequestSnapshot;
 import com.ghost.model.Verdict;
 import jakarta.servlet.FilterChain;
@@ -23,11 +24,13 @@ public class DetectionFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(DetectionFilter.class);
     private final AnomalyDetector detector;
+    private final DetectionMetrics metrics;
     private final boolean trustDeclaredBodyHeader;
 
-    public DetectionFilter(AnomalyDetector detector,
+    public DetectionFilter(AnomalyDetector detector, DetectionMetrics metrics,
                            @org.springframework.beans.factory.annotation.Value("${ghost.trust-declared-body-header:false}") boolean trustDeclaredBodyHeader) {
         this.detector = detector;
+        this.metrics = metrics;
         this.trustDeclaredBodyHeader = trustDeclaredBodyHeader;
     }
 
@@ -45,12 +48,14 @@ public class DetectionFilter extends OncePerRequestFilter {
         res.setHeader("X-Ghost-Score", String.format("%.2f", v.score()));
         res.setHeader("X-Ghost-Fingerprint", v.fingerprint());
         if (!v.allow()) {
+            metrics.recordDeny(v.score());
             log.info("ghost-deny client={} fp={} score={} reasons={}",
                     snap.clientToken(), v.fingerprint(), v.score(), v.reasons());
             res.setHeader("X-Ghost-Reasons", String.join("; ", v.reasons()));
             res.sendError(HttpServletResponse.SC_FORBIDDEN, "anomalous request");
             return;
         }
+        metrics.recordAllow(v.score());
         chain.doFilter(req, res);
     }
 
