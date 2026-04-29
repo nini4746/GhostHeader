@@ -23,9 +23,12 @@ public class DetectionFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(DetectionFilter.class);
     private final AnomalyDetector detector;
+    private final boolean trustDeclaredBodyHeader;
 
-    public DetectionFilter(AnomalyDetector detector) {
+    public DetectionFilter(AnomalyDetector detector,
+                           @org.springframework.beans.factory.annotation.Value("${ghost.trust-declared-body-header:false}") boolean trustDeclaredBodyHeader) {
         this.detector = detector;
+        this.trustDeclaredBodyHeader = trustDeclaredBodyHeader;
     }
 
     @Override
@@ -58,9 +61,11 @@ public class DetectionFilter extends OncePerRequestFilter {
         String clientToken = headerOr(req, "X-Client-Token", clientFallback(req));
         long contentLengthHeader = req.getContentLengthLong();
         long bodyBytes = contentLengthHeader < 0 ? 0 : contentLengthHeader;
-        String declared = req.getHeader("X-Declared-Body-Bytes");
-        if (declared != null) {
-            try { bodyBytes = Long.parseLong(declared); } catch (NumberFormatException ignore) {}
+        if (trustDeclaredBodyHeader) {
+            String declared = req.getHeader("X-Declared-Body-Bytes");
+            if (declared != null) {
+                try { bodyBytes = Long.parseLong(declared); } catch (NumberFormatException ignore) {}
+            }
         }
         return new RequestSnapshot(
                 clientToken,

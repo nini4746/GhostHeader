@@ -15,15 +15,24 @@ public class AnomalyDetector {
     private final double threshold;
     private final long warmupRequests;
     private final long burstThresholdMs;
+    private final double zScoreCutoff;
+    private final double zScoreMaxAdd;
+    private final double minStddevMs;
 
     public AnomalyDetector(ProfileStore profiles,
                            @Value("${ghost.threshold:5.0}") double threshold,
                            @Value("${ghost.warmup-requests:5}") long warmupRequests,
-                           @Value("${ghost.burst-threshold-ms:50}") long burstThresholdMs) {
+                           @Value("${ghost.burst-threshold-ms:50}") long burstThresholdMs,
+                           @Value("${ghost.z-score-cutoff:4.0}") double zScoreCutoff,
+                           @Value("${ghost.z-score-max-add:3.0}") double zScoreMaxAdd,
+                           @Value("${ghost.min-stddev-ms:1.0}") double minStddevMs) {
         this.profiles = profiles;
         this.threshold = threshold;
         this.warmupRequests = warmupRequests;
         this.burstThresholdMs = burstThresholdMs;
+        this.zScoreCutoff = zScoreCutoff;
+        this.zScoreMaxAdd = zScoreMaxAdd;
+        this.minStddevMs = minStddevMs;
     }
 
     public Verdict evaluate(RequestSnapshot s) {
@@ -52,19 +61,20 @@ public class AnomalyDetector {
         score += headerOrderPenalty(s, uaIsBrowserShape, reasons);
 
         Profile clientProfile = profiles.clientProfile(s.clientToken());
-        if (clientProfile.totalRequests() >= warmupRequests && clientProfile.lastSeenMs() >= 0) {
-            long delta = s.timestampMs() - clientProfile.lastSeenMs();
+        Profile.Snapshot snap = clientProfile.snapshot();
+        if (snap.totalRequests() >= warmupRequests && snap.lastSeenMs() >= 0) {
+            long delta = s.timestampMs() - snap.lastSeenMs();
             if (delta >= 0 && delta < burstThresholdMs) {
                 reasons.add("burst rhythm (" + delta + "ms < " + burstThresholdMs + "ms)");
                 score += 6.0;
             }
-            double mean = clientProfile.intervalMean();
-            double sd = clientProfile.intervalStddev();
-            if (sd > 0 && mean > 0) {
+            double mean = snap.intervalMean();
+            double sd = Math.max(minStddevMs, snap.intervalStddev());
+            if (mean > 0) {
                 double z = Math.abs(delta - mean) / sd;
-                if (z > 4.0) {
+                if (z > zScoreCutoff) {
                     reasons.add(String.format("interval z-score %.2f", z));
-                    score += Math.min(3.0, z - 4.0);
+                    score += Math.min(zScoreMaxAdd, z - zScoreCutoff);
                 }
             }
         }
@@ -84,7 +94,6 @@ public class AnomalyDetector {
 
     private double headerOrderPenalty(RequestSnapshot s, boolean browserUa, List<String> reasons) {
         if (!browserUa) return 0;
-        // Real browsers send Host first, then User-Agent or Accept early.
         List<String> ordered = s.orderedHeaderNames();
         if (ordered.isEmpty()) return 0;
         String first = ordered.get(0).toLowerCase();

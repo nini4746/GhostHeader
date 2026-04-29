@@ -1,7 +1,16 @@
 server:
-  port: 8110
+  port: ${SERVER_PORT:8110}
 
 ghost:
-  threshold: 5.0
-  warmup-requests: 5
-  burst-threshold-ms: 50
+  threshold: ${GHOST_THRESHOLD:5.0}
+  warmup-requests: ${GHOST_WARMUP_REQUESTS:5}
+  burst-threshold-ms: ${GHOST_BURST_THRESHOLD_MS:50}
+  z-score-cutoff: ${GHOST_Z_SCORE_CUTOFF:4.0}
+  z-score-max-add: ${GHOST_Z_SCORE_MAX_ADD:3.0}
+  min-stddev-ms: ${GHOST_MIN_STDDEV_MS:1.0}
+  trust-declared-body-header: ${GHOST_TRUST_DECLARED_BODY_HEADER:false}
+  store:
+    max-clients: ${GHOST_MAX_CLIENTS:50000}
+    max-fingerprints: ${GHOST_MAX_FINGERPRINTS:5000}
+    ttl-ms: ${GHOST_TTL_MS:3600000}
+    sweep-interval-ms: ${GHOST_SWEEP_INTERVAL_MS:60000}

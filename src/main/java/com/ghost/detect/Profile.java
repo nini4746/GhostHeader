@@ -1,19 +1,20 @@
 package com.ghost.detect;
 
-import java.util.concurrent.atomic.AtomicLong;
-
 public class Profile {
+
+    public record Snapshot(long totalRequests, long count, long lastSeenMs,
+                           double intervalMean, double intervalStddev) {}
 
     private final Object lock = new Object();
     private long count = 0;
     private long lastSeenMs = -1;
     private double intervalMean = 0;
     private double intervalM2 = 0;
-    private final AtomicLong totalRequests = new AtomicLong();
+    private long totalRequests = 0;
 
     public void observe(long nowMs) {
         synchronized (lock) {
-            totalRequests.incrementAndGet();
+            totalRequests++;
             if (lastSeenMs >= 0) {
                 long delta = nowMs - lastSeenMs;
                 count++;
@@ -22,6 +23,13 @@ public class Profile {
                 intervalM2 += d * (delta - intervalMean);
             }
             lastSeenMs = nowMs;
+        }
+    }
+
+    public Snapshot snapshot() {
+        synchronized (lock) {
+            double sd = count < 2 ? 0.0 : Math.sqrt(intervalM2 / (count - 1));
+            return new Snapshot(totalRequests, count, lastSeenMs, intervalMean, sd);
         }
     }
 
@@ -34,5 +42,5 @@ public class Profile {
         }
     }
     public long lastSeenMs() { synchronized (lock) { return lastSeenMs; } }
-    public long totalRequests() { return totalRequests.get(); }
+    public long totalRequests() { synchronized (lock) { return totalRequests; } }
 }
