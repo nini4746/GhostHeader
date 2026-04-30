@@ -22,10 +22,12 @@ class HttpFlowTests {
     @Autowired private MockMvc mvc;
     @Autowired private ProfileStore store;
     @Autowired private MeterRegistry meters;
+    @Autowired private com.ghost.detect.DynamicThreshold threshold;
 
     @BeforeEach
     void reset() {
         store.clear();
+        threshold.resetState();
     }
 
     @Test

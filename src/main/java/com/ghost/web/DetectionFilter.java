@@ -80,7 +80,9 @@ public class DetectionFilter extends OncePerRequestFilter {
                 req.getHeader("Cookie") != null,
                 contentLengthHeader,
                 bodyBytes,
-                System.currentTimeMillis()
+                System.currentTimeMillis(),
+                req.getHeader("Accept-Encoding"),
+                req.getHeader("Sec-Fetch-Site")
         );
     }
 

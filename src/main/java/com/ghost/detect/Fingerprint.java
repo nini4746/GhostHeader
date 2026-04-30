@@ -22,6 +22,8 @@ public final class Fingerprint {
         sb.append("ua:").append(uaShape(s.userAgent())).append('|');
         sb.append("al:").append(s.missingAcceptLanguage() ? "0" : "1").append('|');
         sb.append("ck:").append(s.hasCookie() ? "1" : "0").append('|');
+        sb.append("ae:").append(s.missingAcceptEncoding() ? "0" : "1").append('|');
+        sb.append("sf:").append(s.missingSecFetch() ? "0" : "1").append('|');
         sb.append("clm:").append(s.contentLengthMismatch() ? "1" : "0");
         return sha256(sb.toString()).substring(0, FINGERPRINT_HEX_LEN);
     }
