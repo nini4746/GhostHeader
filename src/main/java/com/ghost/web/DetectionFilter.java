@@ -25,13 +25,13 @@ public class DetectionFilter extends OncePerRequestFilter {
     private static final Logger log = LoggerFactory.getLogger(DetectionFilter.class);
     private final AnomalyDetector detector;
     private final DetectionMetrics metrics;
-    private final boolean trustDeclaredBodyHeader;
+    private final int bodyMeasureCapBytes;
 
     public DetectionFilter(AnomalyDetector detector, DetectionMetrics metrics,
-                           @org.springframework.beans.factory.annotation.Value("${ghost.trust-declared-body-header:false}") boolean trustDeclaredBodyHeader) {
+                           @org.springframework.beans.factory.annotation.Value("${ghost.body-measure-cap-bytes:65536}") int bodyMeasureCapBytes) {
         this.detector = detector;
         this.metrics = metrics;
-        this.trustDeclaredBodyHeader = trustDeclaredBodyHeader;
+        this.bodyMeasureCapBytes = bodyMeasureCapBytes;
     }
 
     @Override
@@ -43,7 +43,11 @@ public class DetectionFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
             throws ServletException, IOException {
-        RequestSnapshot snap = capture(req);
+        // Buffer the body up front so its actual on-wire length is known before we score. This is
+        // what makes the content-length-mismatch signal real: the declared Content-Length header is
+        // compared against the bytes the client actually streamed, in the SAME request.
+        BufferedBodyRequestWrapper wrapped = new BufferedBodyRequestWrapper(req, bodyMeasureCapBytes);
+        RequestSnapshot snap = capture(wrapped);
         Verdict v = detector.evaluate(snap);
         res.setHeader("X-Ghost-Score", String.format("%.2f", v.score()));
         res.setHeader("X-Ghost-Fingerprint", v.fingerprint());
@@ -56,34 +60,40 @@ public class DetectionFilter extends OncePerRequestFilter {
             return;
         }
         metrics.recordAllow(v.score());
-        chain.doFilter(req, res);
+        chain.doFilter(wrapped, res);
     }
 
-    private RequestSnapshot capture(HttpServletRequest req) {
+    private RequestSnapshot capture(BufferedBodyRequestWrapper req) {
         List<String> ordered = new ArrayList<>();
         var names = req.getHeaderNames();
         if (names != null) Collections.list(names).forEach(ordered::add);
         String clientToken = headerOr(req, "X-Client-Token", clientFallback(req));
-        long contentLengthHeader = req.getContentLengthLong();
-        long bodyBytes = contentLengthHeader < 0 ? 0 : contentLengthHeader;
-        if (trustDeclaredBodyHeader) {
-            String declared = req.getHeader("X-Declared-Body-Bytes");
-            if (declared != null) {
-                try { bodyBytes = Long.parseLong(declared); } catch (NumberFormatException ignore) {}
-            }
-        }
+        long declaredContentLength = parseContentLength(req.getHeader("Content-Length"));
+        // Exact streamed length when the body fit inside the cap; otherwise fall back to the
+        // declared value so an over-cap body is not spuriously flagged (see README 제한사항).
+        long actualBodyBytes = req.bodyFullyMeasured() ? req.measuredBodyBytes() : declaredContentLength;
         return new RequestSnapshot(
                 clientToken,
                 ordered,
                 req.getHeader("User-Agent"),
                 req.getHeader("Accept-Language"),
                 req.getHeader("Cookie") != null,
-                contentLengthHeader,
-                bodyBytes,
+                declaredContentLength,
+                actualBodyBytes,
                 System.currentTimeMillis(),
                 req.getHeader("Accept-Encoding"),
                 req.getHeader("Sec-Fetch-Site")
         );
+    }
+
+    private static long parseContentLength(String header) {
+        if (header == null) return -1;
+        try {
+            long v = Long.parseLong(header.trim());
+            return v < 0 ? -1 : v;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 
     private String headerOr(HttpServletRequest r, String n, String fallback) {

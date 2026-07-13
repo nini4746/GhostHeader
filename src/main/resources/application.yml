@@ -14,7 +14,7 @@ ghost:
   z-score-cutoff: ${GHOST_Z_SCORE_CUTOFF:4.0}
   z-score-max-add: ${GHOST_Z_SCORE_MAX_ADD:3.0}
   min-stddev-ms: ${GHOST_MIN_STDDEV_MS:1.0}
-  trust-declared-body-header: ${GHOST_TRUST_DECLARED_BODY_HEADER:false}
+  body-measure-cap-bytes: ${GHOST_BODY_MEASURE_CAP_BYTES:65536}
   store:
     max-clients: ${GHOST_MAX_CLIENTS:50000}
     max-fingerprints: ${GHOST_MAX_FINGERPRINTS:5000}
