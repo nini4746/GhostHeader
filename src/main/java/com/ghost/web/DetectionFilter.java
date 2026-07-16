@@ -26,12 +26,15 @@ public class DetectionFilter extends OncePerRequestFilter {
     private final AnomalyDetector detector;
     private final DetectionMetrics metrics;
     private final int bodyMeasureCapBytes;
+    private final long delayMs;
 
     public DetectionFilter(AnomalyDetector detector, DetectionMetrics metrics,
-                           @org.springframework.beans.factory.annotation.Value("${ghost.body-measure-cap-bytes:65536}") int bodyMeasureCapBytes) {
+                           @org.springframework.beans.factory.annotation.Value("${ghost.body-measure-cap-bytes:65536}") int bodyMeasureCapBytes,
+                           @org.springframework.beans.factory.annotation.Value("${ghost.response.delay-ms:1000}") long delayMs) {
         this.detector = detector;
         this.metrics = metrics;
         this.bodyMeasureCapBytes = bodyMeasureCapBytes;
+        this.delayMs = delayMs;
     }
 
     @Override
@@ -51,16 +54,51 @@ public class DetectionFilter extends OncePerRequestFilter {
         Verdict v = detector.evaluate(snap);
         res.setHeader("X-Ghost-Score", String.format("%.2f", v.score()));
         res.setHeader("X-Ghost-Fingerprint", v.fingerprint());
-        if (!v.allow()) {
-            metrics.recordDeny(v.score());
-            log.info("ghost-deny client={} fp={} score={} reasons={}",
-                    snap.clientToken(), v.fingerprint(), v.score(), v.reasons());
-            res.setHeader("X-Ghost-Reasons", String.join("; ", v.reasons()));
-            res.sendError(HttpServletResponse.SC_FORBIDDEN, "anomalous request");
-            return;
+        switch (v.action()) {
+            case BLOCK -> {
+                metrics.recordDeny(v.score());
+                logAction("block", snap, v);
+                res.setHeader("X-Ghost-Reasons", String.join("; ", v.reasons()));
+                res.sendError(HttpServletResponse.SC_FORBIDDEN, "anomalous request");
+            }
+            case DECOY -> {
+                metrics.recordDecoy(v.score());
+                logAction("decoy", snap, v);
+                // Fake-normal response: mirror the real /api/protected body so a bot
+                // cannot tell it was flagged. Deliberately no X-Ghost-Reasons header.
+                writeDecoy(res);
+            }
+            case DELAY -> {
+                metrics.recordDelay(v.score());
+                logAction("delay", snap, v);
+                sleepQuietly(delayMs);
+                chain.doFilter(wrapped, res); // tarpit: real response, just slow
+            }
+            case ALLOW -> {
+                metrics.recordAllow(v.score());
+                chain.doFilter(wrapped, res);
+            }
         }
-        metrics.recordAllow(v.score());
-        chain.doFilter(wrapped, res);
+    }
+
+    private void logAction(String action, RequestSnapshot snap, Verdict v) {
+        log.info("ghost-{} client={} fp={} score={} reasons={}",
+                action, snap.clientToken(), v.fingerprint(), v.score(), v.reasons());
+    }
+
+    private static void writeDecoy(HttpServletResponse res) throws IOException {
+        res.setStatus(HttpServletResponse.SC_OK);
+        res.setContentType("application/json");
+        res.getWriter().write("{\"ok\":true}");
+    }
+
+    private static void sleepQuietly(long ms) {
+        if (ms <= 0) return;
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private RequestSnapshot capture(BufferedBodyRequestWrapper req) {

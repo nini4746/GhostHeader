@@ -20,13 +20,16 @@ public class AnomalyDetector {
     private final ProfileStore profiles;
     private final List<DetectionRule> rules;
     private final DynamicThreshold threshold;
+    private final ResponsePolicy policy;
 
     public AnomalyDetector(ProfileStore profiles,
                            List<DetectionRule> rules,
-                           DynamicThreshold threshold) {
+                           DynamicThreshold threshold,
+                           ResponsePolicy policy) {
         this.profiles = profiles;
         this.rules = List.copyOf(rules);
         this.threshold = threshold;
+        this.policy = policy;
     }
 
     public Verdict evaluate(RequestSnapshot s) {
@@ -48,9 +51,11 @@ public class AnomalyDetector {
         clientProfile.observe(s.timestampMs());
         profiles.fingerprintProfile(fp).observe(s.timestampMs());
 
-        boolean denied = score >= threshold.currentThreshold();
-        threshold.recordOutcome(denied);
-        return denied ? Verdict.deny(score, reasons, fp) : Verdict.allow(score, reasons, fp);
+        Verdict.Action action = policy.actionFor(score, threshold.currentThreshold());
+        // Feed the EMA on any anomalous outcome (delay/decoy/block), not just block,
+        // so the adaptive threshold still tracks the real anomaly rate.
+        threshold.recordOutcome(action != Verdict.Action.ALLOW);
+        return Verdict.of(action, score, reasons, fp);
     }
 
     public DynamicThreshold thresholdComponent() { return threshold; }

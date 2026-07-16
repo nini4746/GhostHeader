@@ -14,11 +14,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@org.springframework.test.context.TestPropertySource(properties = "ghost.response.delay-ms=20")
 class HttpFlowTests {
 
     @Autowired private MockMvc mvc;
@@ -127,5 +129,43 @@ class HttpFlowTests {
         assertTrue(meters.find("ghost.verdict.allowed").counter().count() >= 1);
         assertTrue(meters.find("ghost.verdict.denied").counter().count() >= 1);
         assertNotNull(meters.find("ghost.score").summary());
+    }
+
+    // Fresh threshold (base 5.0) after reset(); score picked to land in each band.
+
+    @Test
+    void mid_anomaly_gets_delayed_not_blocked() throws Exception {
+        // browser UA, cookie present, missing accept-language(+4) + missing sec-fetch(+2) = 6.0
+        // ratio 1.2 -> DELAY: real response served (200), just slow, no reasons leaked.
+        mvc.perform(get("/api/protected")
+                        .header("Host", "ghost.local")
+                        .header("User-Agent", CHROME_UA)
+                        .header("Accept", "application/json")
+                        .header("Accept-Encoding", "gzip")
+                        .header("Cookie", "session=abc")
+                        .header("X-Client-Token", "delay-client"))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("X-Ghost-Reasons"));
+        assertNotNull(meters.find("ghost.verdict.delayed").counter());
+        assertTrue(meters.find("ghost.verdict.delayed").counter().count() >= 1,
+                "expected a delayed verdict");
+    }
+
+    @Test
+    void high_mid_anomaly_gets_decoy_fake_normal_response() throws Exception {
+        // browser UA, cookie present, missing accept-language(+4) + accept-encoding(+1.5)
+        // + sec-fetch(+2.0) = 7.5, ratio 1.5 -> DECOY: fake-normal 200 body, handler untouched.
+        mvc.perform(get("/api/protected")
+                        .header("Host", "ghost.local")
+                        .header("User-Agent", CHROME_UA)
+                        .header("Accept", "application/json")
+                        .header("Cookie", "session=abc")
+                        .header("X-Client-Token", "decoy-client"))
+                .andExpect(status().isOk())
+                .andExpect(content().json("{\"ok\":true}"))
+                .andExpect(header().doesNotExist("X-Ghost-Reasons")); // stealth: no tell
+        assertNotNull(meters.find("ghost.verdict.decoyed").counter());
+        assertTrue(meters.find("ghost.verdict.decoyed").counter().count() >= 1,
+                "expected a decoyed verdict");
     }
 }
